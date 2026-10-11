@@ -5,7 +5,7 @@
 
 [Script]
 ; ─── Script 1: Xóa cache header trước khi request đi ───
-THHIEU_Request = type=http-request, pattern=^https?:\/\/api\.revenuecat\.com\/v1\/(subscribers\/[^/]+$|receipts$), script-path=https://raw.githubusercontent.com/thhieu2904/shadowrocket-modules/main/revenuecat-request.js, timeout=30
+THHIEU_Request = type=http-request, pattern=^https?:\/\/api\.revenuecat\.com\/v1\/(subscribers\/[^/]+$|receipts$), script-path=https://raw.githubusercontent.com/thhieu2904/shadowrocket-modules/main/thhieu-req.js, timeout=30
 
 ; ─── Script 2: Sửa body response trả về ───
 THHIEU_Response = type=http-response, pattern=^https?:\/\/api\.revenuecat\.com\/v1\/(subscribers\/[^/]+$|receipts$), requires-body=true, max-size=-1, timeout=30, script-path=https://raw.githubusercontent.com/thhieu2904/shadowrocket-modules/main/thhieu.js
