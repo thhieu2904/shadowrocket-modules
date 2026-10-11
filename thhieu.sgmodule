@@ -1,0 +1,8 @@
+#!name=THHIEU Module
+#!desc=Module kiểm thử và chuyển hướng API cục bộ
+
+[Script]
+thhieu = type=http-response, pattern=^https?:\/\/api\.example\.com\/.*, script-path=https://raw.githubusercontent.com/thhieu2904/shadowrocket-modules/main/thhieu.js, requires-body=true, max-size=-1, timeout=30
+
+[MITM]
+hostname = %APPEND% api.example.com
