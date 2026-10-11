@@ -1,123 +1,122 @@
 /**
- * Script can thiệp RevenueCat API - Mô phỏng subscription cao cấp
+ * THHIEU Response Script - RevenueCat Subscriber Modifier
  * Type: http-response
- * Target: api.revenuecat.com/v1/subscribers/* và /v1/receipts
+ * Target: api.revenuecat.com/v1/subscribers/{id}
+ * 
+ * Dựa trên log phân tích từ app Locket (build 2283)
+ * - User ID mẫu: ghoyfJ5UPqY7Cw7zOQ7gfhjMUzs2
+ * - Entitlement key: "Gold" (Locket dùng key này, KHÔNG phải "pro")
+ * - Cần ép expire_date xa để không bị hết hạn
  */
 
 const requestUrl = $request.url;
 const responseBody = $response.body;
 
-console.log("[RevenueCat] Đang xử lý: " + requestUrl);
+console.log("[THHIEU-Res] URL: " + requestUrl);
 
-if (responseBody) {
+// ═══════════════════════════════════════════════════════════
+// CẤU HÌNH — Chỉnh sửa nếu app đổi tên key/product
+// ═══════════════════════════════════════════════════════════
+
+// Key entitlement — Locket dùng "Gold" là chính, thêm fallback cho chắc
+const ENTITLEMENT_KEYS = ["Gold", "gold", "premium", "Premium", "pro"];
+
+// Product ID — Locket Gold subscription
+// (Nếu app đổi, bạn có thể xem trong log response body để biết chính xác)
+const PRODUCT_IDS = [
+    "com.locket.Locket.gold.monthly",
+    "com.locket.Locket.gold.yearly",
+    "locket_gold_monthly",
+    "locket_gold_yearly"
+];
+
+// Thời hạn subscription: 10 năm kể từ giờ
+const EXPIRY_DAYS = 3650;
+
+// ═══════════════════════════════════════════════════════════
+
+if (!responseBody) {
+    // Trường hợp này chỉ xảy ra nếu script request KHÔNG chạy
+    // → nghĩa là bạn quên bật script http-request
+    console.log("[THHIEU-Res] ⚠️ Body rỗng — kiểm tra thhieu-req.js đã chạy chưa!");
+    $done({});
+} else {
     try {
-        let data = JSON.parse(responseBody);
-        console.log("[RevenueCat] Dữ liệu gốc: " + JSON.stringify(data).substring(0, 500) + "...");
+        const data = JSON.parse(responseBody);
 
-        // ============================================================
-        // XỬ LÝ ENDPOINT /subscribers/{app_user_id}
-        // ============================================================
-        if (requestUrl.includes("/subscribers/")) {
-            if (data.subscriber) {
-                const now = new Date();
-                const futureDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
-                const futureDateStr = futureDate.toISOString();
+        // Lấy user ID từ URL để log
+        const uidMatch = requestUrl.match(/subscribers\/([^\/?]+)/);
+        const userId = uidMatch ? uidMatch[1] : "unknown";
+        console.log("[THHIEU-Res] User ID: " + userId);
 
-                // --- Sửa entitlements: thêm quyền "pro" ---
-                if (!data.subscriber.entitlements) {
-                    data.subscriber.entitlements = {};
-                }
-                
-                // Thêm entitlement "pro" nếu chưa có
-                if (!data.subscriber.entitlements.pro) {
-                    data.subscriber.entitlements.pro = {
-                        expires_date: futureDateStr,
-                        grace_period_expires_date: null,
-                        product_identifier: "com.app.pro.yearly",
-                        purchase_date: now.toISOString()
-                    };
-                    console.log("[RevenueCat] Đã thêm entitlement 'pro'");
-                } else {
-                    // Nếu đã có, gia hạn thêm
-                    data.subscriber.entitlements.pro.expires_date = futureDateStr;
-                    console.log("[RevenueCat] Đã gia hạn entitlement 'pro'");
-                }
-
-                // --- Sửa subscriptions: thêm subscription active ---
-                if (!data.subscriber.subscriptions) {
-                    data.subscriber.subscriptions = {};
-                }
-                
-                const subKey = "com.app.pro.yearly";
-                data.subscriber.subscriptions[subKey] = {
-                    expires_date: futureDateStr,
-                    grace_period_expires_date: null,
-                    purchase_date: now.toISOString(),
-                    original_purchase_date: now.toISOString(),
-                    period_type: "normal",
-                    store: "app_store",
-                    is_sandbox: false,
-                    unsubscribe_detected_at: null,
-                    billing_issues_detected_at: null,
-                    ownership_type: "PURCHASED",
-                    store_transaction_id: "1000000000000000"
-                };
-                console.log("[RevenueCat] Đã thêm subscription active");
-
-                // --- Sửa non_subscriptions nếu cần ---
-                if (!data.subscriber.non_subscriptions) {
-                    data.subscriber.non_subscriptions = {};
-                }
-
-                // --- Sửa thông tin user ---
-                data.subscriber.original_app_user_id = data.subscriber.original_app_user_id || "$RCAnonymousID:mock-user-id";
-                data.subscriber.first_seen = data.subscriber.first_seen || "2024-01-01T00:00:00Z";
-                data.subscriber.management_url = data.subscriber.management_url || null;
-                data.subscriber.original_application_version = data.subscriber.original_application_version || "1.0";
-                data.subscriber.original_purchase_date = data.subscriber.original_purchase_date || now.toISOString();
-                data.subscriber.other_purchases = data.subscriber.other_purchases || {};
-                data.subscriber.subscription_status = "active";
-            }
+        // Log các entitlement hiện có (nếu server trả về)
+        if (data.subscriber && data.subscriber.entitlements) {
+            const keys = Object.keys(data.subscriber.entitlements);
+            console.log("[THHIEU-Res] Entitlements gốc: " +
+                (keys.length ? keys.join(", ") : "(trống)"));
         }
 
-        // ============================================================
-        // XỬ LÝ ENDPOINT /receipts (xác thực biên lai)
-        // ============================================================
-        if (requestUrl.includes("/receipts")) {
-            // Đảm bảo response trả về thành công
-            if (data.attributes) {
-                data.attributes = data.attributes || {};
-            }
-            
-            // Thêm thông tin subscription giả
-            data.subscriber = data.subscriber || {};
-            const now = new Date();
-            const futureDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
-            
-            if (!data.subscriber.entitlements) {
-                data.subscriber.entitlements = {};
-            }
-            data.subscriber.entitlements.pro = {
-                expires_date: futureDate.toISOString(),
-                grace_period_expires_date: null,
-                product_identifier: "com.app.pro.yearly",
-                purchase_date: now.toISOString()
+        // Tính mốc thời gian
+        const now = new Date();
+        const futureDate = new Date(now.getTime() + EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+        const futureISO = futureDate.toISOString();
+        const nowISO = now.toISOString();
+
+        // Đảm bảo các object con tồn tại
+        if (!data.subscriber) data.subscriber = {};
+        if (!data.subscriber.entitlements) data.subscriber.entitlements = {};
+        if (!data.subscriber.subscriptions) data.subscriber.subscriptions = {};
+        if (!data.subscriber.non_subscriptions) data.subscriber.non_subscriptions = {};
+        if (!data.subscriber.other_purchases) data.subscriber.other_purchases = {};
+
+        // ─── INJECT ENTITLEMENTS ───
+        ENTITLEMENT_KEYS.forEach(function (key) {
+            const existing = data.subscriber.entitlements[key];
+            data.subscriber.entitlements[key] = {
+                expires_date: futureISO,
+                purchase_date: (existing && existing.purchase_date) || nowISO,
+                product_identifier: PRODUCT_IDS[0],
+                grace_period_expires_date: null
             };
-            console.log("[RevenueCat] Đã xử lý endpoint /receipts");
-        }
+        });
+        console.log("[THHIEU-Res] ✅ Đã inject " + ENTITLEMENT_KEYS.length +
+            " entitlement keys: " + ENTITLEMENT_KEYS.join(", "));
 
-        // ============================================================
-        // TRẢ VỀ DỮ LIỆU ĐÃ SỬA
-        // ============================================================
-        const modifiedBody = JSON.stringify(data);
-        console.log("[RevenueCat] Đã hoàn tất, trả về dữ liệu đã sửa");
-        $done({ body: modifiedBody });
+        // ─── INJECT SUBSCRIPTIONS ───
+        PRODUCT_IDS.forEach(function (pid) {
+            const existing = data.subscriber.subscriptions[pid];
+            data.subscriber.subscriptions[pid] = {
+                expires_date: futureISO,
+                purchase_date: (existing && existing.purchase_date) || nowISO,
+                original_purchase_date: (existing && existing.original_purchase_date) || nowISO,
+                store: "app_store",
+                is_sandbox: false,
+                unsubscribe_detected_at: null,
+                billing_issues_detected_at: null,
+                period_type: "normal",
+                ownership_type: "PURCHASED",
+                store_transaction_id: "2000000000000000",
+                grace_period_expires_date: null
+            };
+        });
+        console.log("[THHIEU-Res] ✅ Đã inject " + PRODUCT_IDS.length + " subscriptions");
 
-    } catch (error) {
-        console.log("[RevenueCat] Lỗi parse JSON: " + error);
+        // ─── CÁC FIELD CƠ BẢN KHÁC ───
+        data.subscriber.original_app_user_id =
+            data.subscriber.original_app_user_id || userId;
+        data.subscriber.first_seen = data.subscriber.first_seen || nowISO;
+        data.subscriber.original_purchase_date =
+            data.subscriber.original_purchase_date || nowISO;
+        data.subscriber.original_application_version =
+            data.subscriber.original_application_version || "1.0";
+
+        // ─── TRẢ VỀ ───
+        const modified = JSON.stringify(data);
+        console.log("[THHIEU-Res] 📦 Body mới: " + modified.length + " bytes");
+        $done({ body: modified });
+
+    } catch (e) {
+        console.log("[THHIEU-Res] ❌ Lỗi parse JSON: " + e);
         $done({});
     }
-} else {
-    console.log("[RevenueCat] Không có body, bỏ qua");
-    $done({});
 }
