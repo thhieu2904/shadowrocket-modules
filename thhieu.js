@@ -1,93 +1,123 @@
 /**
- * Script chuyển hướng dựa trên phản hồi HTTP (type=http-response)
- * Hoàn thiện từ khung sườn gốc - Tích hợp logic redirect
+ * Script can thiệp RevenueCat API - Mô phỏng subscription cao cấp
+ * Type: http-response
+ * Target: api.revenuecat.com/v1/subscribers/* và /v1/receipts
  */
 
-// Lấy thông tin URL và Body từ gói tin phản hồi
 const requestUrl = $request.url;
 const responseBody = $response.body;
 
-// In log để debug
-console.log("[Redirect] Đang can thiệp vào URL: " + requestUrl);
+console.log("[RevenueCat] Đang xử lý: " + requestUrl);
 
 if (responseBody) {
     try {
-        // Bước 1: Parse JSON
         let data = JSON.parse(responseBody);
+        console.log("[RevenueCat] Dữ liệu gốc: " + JSON.stringify(data).substring(0, 500) + "...");
 
-        // Bước 2: Log cấu trúc gốc để quan sát
-        console.log("[Debug] Dữ liệu gốc: " + JSON.stringify(data));
+        // ============================================================
+        // XỬ LÝ ENDPOINT /subscribers/{app_user_id}
+        // ============================================================
+        if (requestUrl.includes("/subscribers/")) {
+            if (data.subscriber) {
+                const now = new Date();
+                const futureDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+                const futureDateStr = futureDate.toISOString();
 
-        // ========================================================
-        // Bước 3: LOGIC CHUYỂN HƯỚNG
-        // ========================================================
-        
-        // --- Cách 1: Chuyển hướng dựa trên trường cụ thể trong JSON ---
-        // Ví dụ: nếu API trả về redirect_url hoặc một flag cần redirect
-        if (data.redirect_url) {
-            console.log("[Redirect] Phát hiện redirect_url: " + data.redirect_url);
-            
-            // Trả về response 302 để chuyển hướng client
-            $done({
-                status: 302,
-                headers: {
-                    "Location": data.redirect_url,
-                    "Content-Type": "text/html"
-                },
-                body: "<html><body>Redirecting...</body></html>"
-            });
-            return; // Dừng script tại đây
-        }
-
-        // --- Cách 2: Chuyển hướng dựa trên một điều kiện cụ thể ---
-        // Ví dụ: nếu user chưa verified, chuyển hướng đến trang xác thực
-        if (data.user && data.user.is_verified === false) {
-            console.log("[Redirect] User chưa verified, chuyển hướng...");
-            
-            $done({
-                status: 302,
-                headers: {
-                    "Location": "https://your-app.com/verify",
-                    "Content-Type": "text/html"
-                },
-                body: "<html><body>Redirecting to verification...</body></html>"
-            });
-            return;
-        }
-
-        // --- Cách 3: Chuyển hướng đến URL cố định dựa trên pattern ---
-        // Ví dụ: chuyển tất cả request đến một domain cụ thể
-        if (requestUrl.includes("old-api.example.com")) {
-            let newUrl = requestUrl.replace("old-api.example.com", "new-api.example.com");
-            console.log("[Redirect] Chuyển hướng đến: " + newUrl);
-            
-            $done({
-                status: 307, // 307 giữ nguyên method (POST, PUT, v.v.)
-                headers: {
-                    "Location": newUrl
+                // --- Sửa entitlements: thêm quyền "pro" ---
+                if (!data.subscriber.entitlements) {
+                    data.subscriber.entitlements = {};
                 }
-            });
-            return;
+                
+                // Thêm entitlement "pro" nếu chưa có
+                if (!data.subscriber.entitlements.pro) {
+                    data.subscriber.entitlements.pro = {
+                        expires_date: futureDateStr,
+                        grace_period_expires_date: null,
+                        product_identifier: "com.app.pro.yearly",
+                        purchase_date: now.toISOString()
+                    };
+                    console.log("[RevenueCat] Đã thêm entitlement 'pro'");
+                } else {
+                    // Nếu đã có, gia hạn thêm
+                    data.subscriber.entitlements.pro.expires_date = futureDateStr;
+                    console.log("[RevenueCat] Đã gia hạn entitlement 'pro'");
+                }
+
+                // --- Sửa subscriptions: thêm subscription active ---
+                if (!data.subscriber.subscriptions) {
+                    data.subscriber.subscriptions = {};
+                }
+                
+                const subKey = "com.app.pro.yearly";
+                data.subscriber.subscriptions[subKey] = {
+                    expires_date: futureDateStr,
+                    grace_period_expires_date: null,
+                    purchase_date: now.toISOString(),
+                    original_purchase_date: now.toISOString(),
+                    period_type: "normal",
+                    store: "app_store",
+                    is_sandbox: false,
+                    unsubscribe_detected_at: null,
+                    billing_issues_detected_at: null,
+                    ownership_type: "PURCHASED",
+                    store_transaction_id: "1000000000000000"
+                };
+                console.log("[RevenueCat] Đã thêm subscription active");
+
+                // --- Sửa non_subscriptions nếu cần ---
+                if (!data.subscriber.non_subscriptions) {
+                    data.subscriber.non_subscriptions = {};
+                }
+
+                // --- Sửa thông tin user ---
+                data.subscriber.original_app_user_id = data.subscriber.original_app_user_id || "$RCAnonymousID:mock-user-id";
+                data.subscriber.first_seen = data.subscriber.first_seen || "2024-01-01T00:00:00Z";
+                data.subscriber.management_url = data.subscriber.management_url || null;
+                data.subscriber.original_application_version = data.subscriber.original_application_version || "1.0";
+                data.subscriber.original_purchase_date = data.subscriber.original_purchase_date || now.toISOString();
+                data.subscriber.other_purchases = data.subscriber.other_purchases || {};
+                data.subscriber.subscription_status = "active";
+            }
         }
 
-        // ========================================================
-        // Bước 4: Nếu không có redirect, trả về dữ liệu đã sửa (nếu cần)
-        // ========================================================
-        
-        // Ví dụ sửa dữ liệu trước khi trả về
-        // if (data.someField) {
-        //     data.someField = "newValue";
-        // }
+        // ============================================================
+        // XỬ LÝ ENDPOINT /receipts (xác thực biên lai)
+        // ============================================================
+        if (requestUrl.includes("/receipts")) {
+            // Đảm bảo response trả về thành công
+            if (data.attributes) {
+                data.attributes = data.attributes || {};
+            }
+            
+            // Thêm thông tin subscription giả
+            data.subscriber = data.subscriber || {};
+            const now = new Date();
+            const futureDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+            
+            if (!data.subscriber.entitlements) {
+                data.subscriber.entitlements = {};
+            }
+            data.subscriber.entitlements.pro = {
+                expires_date: futureDate.toISOString(),
+                grace_period_expires_date: null,
+                product_identifier: "com.app.pro.yearly",
+                purchase_date: now.toISOString()
+            };
+            console.log("[RevenueCat] Đã xử lý endpoint /receipts");
+        }
 
-        // Đóng gói và trả về JSON đã sửa
-        $done({ body: JSON.stringify(data) });
+        // ============================================================
+        // TRẢ VỀ DỮ LIỆU ĐÃ SỬA
+        // ============================================================
+        const modifiedBody = JSON.stringify(data);
+        console.log("[RevenueCat] Đã hoàn tất, trả về dữ liệu đã sửa");
+        $done({ body: modifiedBody });
 
     } catch (error) {
-        console.log("[Debug] Lỗi parse JSON: " + error);
-        // Nếu không phải JSON hợp lệ, giữ nguyên gói gốc
+        console.log("[RevenueCat] Lỗi parse JSON: " + error);
         $done({});
     }
 } else {
-    // Không có body, bỏ qua
+    console.log("[RevenueCat] Không có body, bỏ qua");
     $done({});
 }
